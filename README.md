@@ -103,6 +103,17 @@
 
 MediaPipe 运行时、WASM 和手部模型遵循 Apache-2.0，来源与文件说明见 `assets/gesture/README.txt`。
 
+## GitHub 仓库和完整下载
+
+GitHub 主仓库为了避开单文件上传限制，只放网页、预览图和小的运行时代码，**没有直接提交 17MB 的模型 + WASM**。托管在 GitHub Pages 时，页面会自动从 `npmmirror` / `ghfast` 镜像加载它们，功能是完整的。
+
+如果要在本地 clone 后**完全离线**运行：
+
+- Windows：在仓库根目录运行 `powershell -ExecutionPolicy Bypass -File scripts/fetch-models.ps1`
+- macOS / Linux：运行 `bash scripts/fetch-models.sh`
+
+脚本会下载并校验 `hand_landmarker.task` 和 `vision_wasm_internal.wasm`。补齐后按普通手势模式启动即可。仓库的 Release 里也会提供包含完整模型的 `圣诞树.zip`。
+
 ## 照片、音乐和隐私
 
 - 所有照片只保存在**本机浏览器的 localStorage** 里，音乐保存在浏览器的 IndexedDB 里，都不会上传到任何服务器。
@@ -161,6 +172,7 @@ index.html             页面本体（图片、样式、脚本都在这一个文
 打开圣诞树.bat         普通模式：双击用默认浏览器打开
 启动手势模式.bat       手势模式：启动本地服务器并打开摄像头页面
 serve.ps1              启动手势模式用的零依赖本地静态服务器
+scripts/               下载完整手势模型的辅助脚本
 assets/gesture/        手势识别模型 + MediaPipe WASM（大约 17MB）
 preview/               预览图
 README.md              这份说明

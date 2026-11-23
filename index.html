@@ -5609,13 +5609,11 @@
     gestureTray.hidden = false;
     gestureBtn.setAttribute('aria-expanded', 'true');
     updateGestureControls();
-    if (!GESTURE_LOCAL_ORIGIN) {
-      if (gestureModelUrl) {
-        setGestureStatus('手势模型已就绪，点「开启手势」');
-      } else {
-        if (gestureProgressValue <= 0) setGestureStatus('正在准备手势模型…');
-        prepareGestureAssets();
-      }
+    if (gestureModelUrl) {
+      setGestureStatus('手势模型已就绪，点「开启手势」');
+    } else {
+      if (gestureProgressValue <= 0) setGestureStatus('正在准备手势模型…');
+      prepareGestureAssets();
     }
     requestAnimationFrame(() => {
       if (gestureTray.hidden) return;
@@ -5810,23 +5808,32 @@
         }
 
         let buffer = null;
-        if (!GESTURE_LOCAL_ORIGIN) {
+        const localModelUrl = new URL('./assets/gesture/hand_landmarker.task', window.location.href).href;
+        const tryLocalModel = async () => {
           try {
-            buffer = await fetchGestureModelBuffer(GESTURE_MODEL_MIRROR, '正在下载手势模型');
-            if (!(await verifyGestureModel(buffer))) buffer = null;
+            const candidate = await fetchGestureModelBuffer(localModelUrl, '正在加载手势模型');
+            return (await verifyGestureModel(candidate)) ? candidate : null;
           } catch (error) {
-            buffer = null;
+            return null;
           }
-        }
+        };
+        const tryMirrorModel = async () => {
+          try {
+            const candidate = await fetchGestureModelBuffer(GESTURE_MODEL_MIRROR, '正在下载手势模型');
+            return (await verifyGestureModel(candidate)) ? candidate : null;
+          } catch (error) {
+            return null;
+          }
+        };
 
-        if (!buffer) {
-          const localModelUrl = new URL('./assets/gesture/hand_landmarker.task', window.location.href).href;
-          buffer = await fetchGestureModelBuffer(
-            localModelUrl,
-            GESTURE_LOCAL_ORIGIN ? '正在加载手势模型' : '正在加载备用模型'
-          );
-          if (!(await verifyGestureModel(buffer))) throw new Error('gesture model hash mismatch');
+        if (GESTURE_LOCAL_ORIGIN) {
+          buffer = await tryLocalModel();
+          if (!buffer) buffer = await tryMirrorModel();
+        } else {
+          buffer = await tryMirrorModel();
+          if (!buffer) buffer = await tryLocalModel();
         }
+        if (!buffer) throw new Error('gesture model unavailable');
 
         gestureModelUrl = URL.createObjectURL(new Blob([buffer], { type: 'application/octet-stream' }));
         if (!GESTURE_LOCAL_ORIGIN) writeGestureModelCache(buffer);
@@ -5849,19 +5856,28 @@
     return { vision, fileset, source: 'local' };
   }
 
+  async function loadCdnGestureRuntime() {
+    const vision = await import(`${GESTURE_CDN_BASE}vision_bundle.mjs`);
+    const fileset = await vision.FilesetResolver.forVisionTasks(`${GESTURE_CDN_BASE}wasm`);
+    return { vision, fileset, source: 'cdn' };
+  }
+
   async function loadGestureRuntime() {
     if (gestureRuntime) return gestureRuntime;
     if (gestureRuntimePromise) return gestureRuntimePromise;
 
     gestureRuntimePromise = (async () => {
       if (GESTURE_LOCAL_ORIGIN) {
-        gestureRuntime = await loadLocalGestureRuntime();
-        return gestureRuntime;
+        try {
+          gestureRuntime = await loadLocalGestureRuntime();
+          return gestureRuntime;
+        } catch (error) {
+          gestureRuntime = await loadCdnGestureRuntime();
+          return gestureRuntime;
+        }
       }
       try {
-        const vision = await import(`${GESTURE_CDN_BASE}vision_bundle.mjs`);
-        const fileset = await vision.FilesetResolver.forVisionTasks(`${GESTURE_CDN_BASE}wasm`);
-        gestureRuntime = { vision, fileset, source: 'cdn' };
+        gestureRuntime = await loadCdnGestureRuntime();
         return gestureRuntime;
       } catch (error) {
         gestureRuntime = await loadLocalGestureRuntime();
@@ -5897,9 +5913,12 @@
         try {
           return await createHandLandmarker(runtime, modelUrl);
         } catch (error) {
-          if (runtime.source === 'local') throw error;
-          const localRuntime = await loadLocalGestureRuntime();
-          return await createHandLandmarker(localRuntime, modelUrl);
+          const alternate = runtime.source === 'local'
+            ? await loadCdnGestureRuntime()
+            : await loadLocalGestureRuntime();
+          const landmarker = await createHandLandmarker(alternate, modelUrl);
+          gestureRuntime = alternate;
+          return landmarker;
         }
       })();
       handLandmarkerPromise.catch(() => {
@@ -5912,7 +5931,7 @@
   }
 
   function prepareGestureAssets() {
-    if (gestureActive || gestureStarting || GESTURE_LOCAL_ORIGIN) return;
+    if (gestureActive || gestureStarting) return;
     ensureGestureModel().catch(() => {});
     loadGestureRuntime().catch(() => {});
   }
